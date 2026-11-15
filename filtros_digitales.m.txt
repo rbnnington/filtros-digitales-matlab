@@ -1,0 +1,116 @@
+%% PRÁCTICA: DISEÑO E IMPLEMENTACIÓN DE FILTROS DIGITALES
+% Asignatura: Señales y Sistemas (2026-3)
+% Descripción: Diseño de filtros IIR (Butterworth, Chebyshev) y FIR (Ventana)
+%              pasa bajos, pasa altos y pasa bandas aplicados a una señal con ruido.
+
+clear; clc; close all;
+
+%% 1. DEFINICIÓN DE LA SEÑAL DE ENTRADA
+fs = 1000;              % Frecuencia de muestreo en Hz (1000 muestras/s)
+T = 1;                  % Duración de la señal en segundos
+t = 0:1/fs:T-(1/fs);    % Vector de tiempo
+N = length(t);          % Número total de muestras
+
+% Creamos una señal compuesta por tres frecuencias:
+% - Baja frecuencia: 5 Hz
+% - Frecuencia media: 50 Hz
+% - Alta frecuencia: 250 Hz
+f_baja = 5;
+f_media = 50;
+f_alta = 250;
+
+senal_limpia = 1.0*sin(2*pi*f_baja*t) + ...
+               0.7*sin(2*pi*f_media*t) + ...
+               0.5*sin(2*pi*f_alta*t);
+
+% Agregamos ruido blanco gaussiano
+rng(42); % Semilla para reproducibilidad
+ruido = 0.6 * randn(size(t));
+senal_ruidosa = senal_limpia + ruido;
+
+%% 2. DISEÑO DE LOS FILTROS (IIR y FIR)
+nyquist = fs / 2; % Frecuencia de Nyquist (500 Hz)
+
+% A) Filtro IIR Pasa Bajos (Butterworth) -> Aísla 5 Hz
+orden_iir = 4;
+fc_low = 15; % Frecuencia de corte en Hz
+[b_low, a_low] = butter(orden_iir, fc_low / nyquist, 'low');
+
+% B) Filtro IIR Pasa Altos (Chebyshev Tipo I) -> Aísla 250 Hz
+fc_high = 150; % Frecuencia de corte en Hz
+rp = 1;        % Rizado máximo en banda de paso (dB)
+[b_high, a_high] = cheby1(orden_iir, rp, fc_high / nyquist, 'high');
+
+% C) Filtro FIR Pasa Bandas (Ventana Hamming) -> Aísla 50 Hz
+orden_fir = 100;           % Orden del filtro (101 coeficientes)
+banda = [30 80];           % Banda de paso [f_min f_max] en Hz
+b_band = fir1(orden_fir, banda / nyquist, 'bandpass', hamming(orden_fir + 1));
+a_band = 1;                % Los filtros FIR tienen denominador igual a 1
+
+%% 3. APLICACIÓN DE LOS FILTROS A LA SEÑAL
+% Usamos filtfilt para filtrado de fase cero (evita el desfase temporal)
+senal_pasa_bajos  = filtfilt(b_low, a_low, senal_ruidosa);
+senal_pasa_altos  = filtfilt(b_high, a_high, senal_ruidosa);
+senal_pasa_bandas = filtfilt(b_band, a_band, senal_ruidosa);
+
+%% 4. VISUALIZACIÓN DE RESULTADOS
+
+% --- FIGURA 1: Respuesta en Frecuencia de los 3 Filtros ---
+figure('Name', 'Respuesta en Frecuencia', 'Color', 'w', 'Position', [100 100 900 400]);
+
+[h_low, f_vec]  = freqz(b_low, a_low, 2048, fs);
+[h_high, ~]     = freqz(b_high, a_high, 2048, fs);
+[h_band, ~]     = freqz(b_band, a_band, 2048, fs);
+
+plot(f_vec, 20*log10(abs(h_low) + eps), 'b', 'LineWidth', 1.5); hold on;
+plot(f_vec, 20*log10(abs(h_band) + eps), 'g', 'LineWidth', 1.5);
+plot(f_vec, 20*log10(abs(h_high) + eps), 'r', 'LineWidth', 1.5);
+grid on;
+title('Respuesta en Frecuencia de los Filtros Diseñados');
+xlabel('Frecuencia [Hz]');
+ylabel('Magnitud [dB]');
+ylim([-80 5]);
+legend('IIR Pasa Bajos (Butterworth 15 Hz)', ...
+       'FIR Pasa Bandas (Hamming 30-80 Hz)', ...
+       'IIR Pasa Altos (Chebyshev 150 Hz)', 'Location', 'SouthWest');
+
+% --- FIGURA 2: Comparación en Tiempo y Frecuencia (Antes vs Después) ---
+figure('Name', 'Análisis Temporal y Espectral', 'Color', 'w', 'Position', [100 50 1100 800]);
+
+% Preparación de datos para iterar en las gráficas
+senales = {senal_ruidosa, senal_pasa_bajos, senal_pasa_bandas, senal_pasa_altos};
+titulos = {'Señal Original con Ruido (5Hz + 50Hz + 250Hz + Ruido)', ...
+           'Filtrada: Pasa Bajos (Recupera 5 Hz)', ...
+           'Filtrada: Pasa Bandas (Recupera 50 Hz)', ...
+           'Filtrada: Pasa Altos (Recupera 250 Hz)'};
+colores = {[0.4 0.4 0.4], 'b', [0 0.6 0], 'r'};
+
+% Vector de frecuencias para la FFT (mitad positiva)
+f_fft = fs * (0:(N/2)) / N;
+
+for i = 1:4
+    sig_actual = senales{i};
+    
+    % Subgráfica izquierda: Dominio del Tiempo (primeros 0.25 s para claridad)
+    subplot(4, 2, (2*i)-1);
+    plot(t(1:250), sig_actual(1:250), 'Color', colores{i}, 'LineWidth', 1.2);
+    title([titulos{i} ' - Tiempo']);
+    xlabel('Tiempo [s]');
+    ylabel('Amplitud');
+    grid on;
+    
+    % Cálculo de la FFT de un solo lado
+    Y = fft(sig_actual);
+    P2 = abs(Y / N);
+    P1 = P2(1:N/2+1);
+    P1(2:end-1) = 2 * P1(2:end-1);
+    
+    % Subgráfica derecha: Dominio de la Frecuencia (FFT)
+    subplot(4, 2, 2*i);
+    plot(f_fft, P1, 'Color', colores{i}, 'LineWidth', 1.2);
+    title([titulos{i} ' - Espectro (FFT)']);
+    xlabel('Frecuencia [Hz]');
+    ylabel('Magnitud');
+    xlim([0 350]);
+    grid on;
+end
